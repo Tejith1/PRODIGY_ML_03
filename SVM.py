@@ -1,60 +1,70 @@
-import tensorflow as tf
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from keras.preprocessing import image
+import os
 import numpy as np
-from IPython.display import Image as IPImage, display
+import cv2
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.preprocessing import StandardScaler
 
-# Image data generators
-train_datagen = ImageDataGenerator(rescale=1./255,
-                                   shear_range=0.2,
-                                   zoom_range=0.2,
-                                   horizontal_flip=True)
+# Load dataset paths
+def load_images_from_folder(folder, label, image_size=(64, 64)):
+    images = []
+    labels = []
+    for filename in os.listdir(folder):
+        img_path = os.path.join(folder, filename)
+        img = cv2.imread(img_path)
+        if img is not None:
+            img = cv2.resize(img, image_size)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+            img = img.flatten()  # Flatten the image
+            images.append(img)
+            labels.append(label)
+    return images, labels
 
-training_set = train_datagen.flow_from_directory('train_set',
-                                                 target_size=(64, 64),
-                                                 batch_size=32,
-                                                 class_mode='categorical')
+# Save predictions to CSV
+def save_predictions_to_csv(predictions, output_file='submission.csv'):
+    df = pd.DataFrame(predictions, columns=['ImageId', 'Label'])
+    df.to_csv(output_file, index=False)
+    print(f"Predictions saved to {output_file}")
 
-test_datagen = ImageDataGenerator(rescale=1./255)
-test_set = test_datagen.flow_from_directory('test_set',
-                                            target_size=(64, 64),
-                                            batch_size=32,
-                                            class_mode='categorical')
+# Paths to the dataset folders
+bird_folder = 'path_to_your_bird_images'  # Update with the path to your bird images
+fish_folder = 'path_to_your_fish_images'  # Update with the path to your fish images
 
-# Building the CNN
-cnn = tf.keras.models.Sequential()
-cnn.add(tf.keras.layers.Conv2D(filters=32, kernel_size=3, activation='relu', input_shape=[64, 64, 3]))
-cnn.add(tf.keras.layers.MaxPool2D(pool_size=2, strides=2))
-cnn.add(tf.keras.layers.Conv2D(filters=32, kernel_size=3, activation='relu'))
-cnn.add(tf.keras.layers.MaxPool2D(pool_size=2, strides=2))
-cnn.add(tf.keras.layers.Conv2D(filters=32, kernel_size=3, activation='relu'))
-cnn.add(tf.keras.layers.MaxPool2D(pool_size=2, strides=2))
-cnn.add(tf.keras.layers.Conv2D(filters=32, kernel_size=3, activation='relu'))
-cnn.add(tf.keras.layers.MaxPool2D(pool_size=2, strides=2))
-cnn.add(tf.keras.layers.Flatten())
-cnn.add(tf.keras.layers.Dense(units=128, activation='relu'))
-cnn.add(tf.keras.layers.Dense(units=10, activation='softmax'))
+# Load bird images
+bird_images, bird_labels = load_images_from_folder(bird_folder, label=0)  # label 0 for birds
+# Load fish images
+fish_images, fish_labels = load_images_from_folder(fish_folder, label=1)  # label 1 for fish
 
-# Compiling the CNN
-cnn.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+# Combine bird and fish images
+X = np.array(bird_images + fish_images)
+y = np.array(bird_labels + fish_labels)
 
-# Fitting the CNN to the training set
-cnn.fit(x=training_set, validation_data=test_set, epochs=30)
+# Split the dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Function to predict class from image
-def predict_class(image_path):
-    test_image = image.load_img(image_path, target_size=(64, 64))
-    test_image = image.img_to_array(test_image)
-    test_image = np.expand_dims(test_image, axis=0)
-    result = cnn.predict(test_image)
-    predicted_class_index = np.argmax(result, axis=1)[0]
-    return class_labels[predicted_class_index]
+# Standardize the features
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
 
-# Updated class labels
-class_labels = ['cat', 'dog', 'bird', 'fish', 'rabbit', 'hamster', 'turtle', 'lizard', 'snake', 'frog']
+# Initialize the SVM model
+svm = SVC(kernel='rbf')  # You can try other kernels like 'linear', 'poly', etc.
 
-# Test image visualization and prediction
-for img_path in ['img5.png', 'img8.png']:
-    display(IPImage(img_path))
-    predicted_class_name = predict_class(img_path)
-    print(f'Predicted class for {img_path}: {predicted_class_name}')
+# Train the model
+svm.fit(X_train, y_train)
+
+# Predict on the test set
+y_pred = svm.predict(X_test)
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Accuracy: {accuracy * 100:.2f}%")
+print("Classification Report:\n", classification_report(y_test, y_pred))
+
+# Save predictions to CSV
+# Assuming the test images are named in a way that corresponds to their index
+test_image_ids = range(len(y_pred))  # Create an image ID list
+predictions = list(zip(test_image_ids, y_pred))  # Combine IDs with predictions
+save_predictions_to_csv(predictions)
